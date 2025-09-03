@@ -1,0 +1,5 @@
+{
+  "name": "Product Scene Creator",
+  "description": "Seamlessly place your product into a custom lifestyle image. Upload a product photo, then either upload a lifestyle background or generate a new one with AI. The app will merge them into a professional-grade marketing image using Gemini.",
+  "requestFramePermissions": []
+}
