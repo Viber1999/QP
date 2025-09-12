@@ -3,8 +3,8 @@ export interface ImageData {
   mimeType: string;
 }
 
-export interface Resolution {
-  label: string;
-  width: number;
-  height: number;
+export interface VideoData {
+  id: string;
+  url: string; // Object URL from blob
+  prompt: string;
 }

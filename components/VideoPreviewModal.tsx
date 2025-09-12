@@ -1,0 +1,70 @@
+import React from 'react';
+import type { VideoData } from '../types';
+import { CloseIcon, DownloadIcon } from './IconComponents';
+
+interface VideoPreviewModalProps {
+  video: VideoData | null;
+  onClose: () => void;
+}
+
+export const VideoPreviewModal: React.FC<VideoPreviewModalProps> = ({ video, onClose }) => {
+  if (!video) {
+    return null;
+  }
+
+  const handleDownload = () => {
+    const link = document.createElement('a');
+    link.href = video.url;
+    link.download = `product-video-${Date.now()}.mp4`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const stopPropagation = (e: React.MouseEvent) => e.stopPropagation();
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 sm:p-8"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="video-preview-title"
+    >
+      <div
+        className="relative w-full max-w-4xl max-h-[90vh] bg-gray-900/80 border border-gray-700 rounded-xl shadow-2xl p-4 flex flex-col"
+        onClick={stopPropagation}
+      >
+        <div className="flex justify-between items-center mb-4 flex-shrink-0">
+          <h2 id="video-preview-title" className="text-lg font-semibold text-gray-300">Video Preview</h2>
+          <div className="flex items-center space-x-2">
+             <button
+              onClick={handleDownload}
+              className="bg-gray-800/70 p-2 rounded-full text-gray-300 hover:bg-indigo-600 hover:text-white shadow-lg transition-all duration-200"
+              title="Download Video"
+            >
+              <DownloadIcon className="h-6 w-6" />
+            </button>
+            <button
+              onClick={onClose}
+              className="bg-gray-800/70 p-2 rounded-full text-gray-300 hover:bg-red-600/80 hover:text-white transition-colors duration-200"
+              aria-label="Close preview"
+            >
+              <CloseIcon className="h-6 w-6" />
+            </button>
+          </div>
+        </div>
+        <div className="flex-grow flex items-center justify-center overflow-hidden min-h-0 bg-black rounded-lg">
+            <video
+              src={video.url}
+              className="max-w-full max-h-full object-contain"
+              controls
+              autoPlay
+              loop
+            />
+        </div>
+         <p className="text-xs text-gray-500 mt-2 truncate" title={video.prompt}>Prompt: {video.prompt}</p>
+      </div>
+    </div>
+  );
+};

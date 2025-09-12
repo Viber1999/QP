@@ -3,17 +3,15 @@ import { ImageUploader } from './components/ImageUploader';
 import { LifestyleGenerator } from './components/LifestyleGenerator';
 import { ResultDisplay } from './components/ResultDisplay';
 import { Header } from './components/Header';
-import { ArrowIcon } from './components/IconComponents';
+import { ArrowIcon, SparklesIcon, VideoIcon } from './components/IconComponents';
 import { Sidebar, Tab } from './components/Sidebar';
-import { generateLifestyleImage, combineImages } from './services/geminiService';
+import { generateLifestyleImage, combineImages, removeImageBackground, generateVideo } from './services/geminiService';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
-import type { ImageData, Resolution } from './types';
-
-const RESOLUTION_OPTIONS: Resolution[] = [
-  { label: '200x200', width: 200, height: 200 },
-  { label: '500x500', width: 500, height: 500 },
-  { label: '2000x2000', width: 2000, height: 2000 },
-];
+import { VideoPreviewModal } from './components/VideoPreviewModal';
+import type { ImageData, VideoData } from './types';
+import { Spinner } from './components/Spinner';
+import { ToggleSwitch } from './components/ToggleSwitch';
+import { VideoResultDisplay } from './components/VideoResultDisplay';
 
 const App: React.FC = () => {
   // Workspace state
@@ -25,15 +23,21 @@ const App: React.FC = () => {
   const [productHistory, setProductHistory] = useState<ImageData[]>([]);
   const [lifestyleHistory, setLifestyleHistory] = useState<ImageData[]>([]);
   const [resultHistory, setGeneratedHistory] = useState<ImageData[]>([]);
+  const [videoHistory, setVideoHistory] = useState<VideoData[]>([]);
 
   // UI State
   const [activeTab, setActiveTab] = useState<Tab>('products');
+  const [combinationModel, setCombinationModel] = useState<'gemini' | 'qwen'>('gemini');
   const [combinationPrompt, setCombinationPrompt] = useState<string>('Place these glasses in scene, replace existing glasses if present.');
-  const [selectedResolution, setSelectedResolution] = useState<Resolution>(RESOLUTION_OPTIONS[1]);
+  const [videoPrompt, setVideoPrompt] = useState<string>('Make the scene cinematic with a gentle camera pan from left to right.');
   const [isLoadingLifestyle, setIsLoadingLifestyle] = useState<boolean>(false);
   const [isLoadingResult, setIsLoadingResult] = useState<boolean>(false);
+  const [isLoadingBackgroundRemoval, setIsLoadingBackgroundRemoval] = useState<boolean>(false);
+  const [isLoadingVideo, setIsLoadingVideo] = useState<boolean>(false);
+  const [videoGenerationStatus, setVideoGenerationStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<ImageData | null>(null);
+  const [previewVideo, setPreviewVideo] = useState<VideoData | null>(null);
 
   const handleProductUpload = useCallback((image: ImageData) => {
     setProductImage(image);
@@ -68,6 +72,30 @@ const App: React.FC = () => {
       setIsLoadingLifestyle(false);
     }
   }, []);
+
+  const handleRemoveBackground = useCallback(async () => {
+    if (!productImage) {
+      setError('Please select a product image first.');
+      return;
+    }
+    setIsLoadingBackgroundRemoval(true);
+    setError(null);
+    const originalImage = productImage; // Keep original for history update
+
+    try {
+      const newImage = await removeImageBackground(productImage);
+      setProductImage(newImage);
+      // Update history as well
+      setProductHistory(prev => 
+        prev.map(img => img.base64 === originalImage.base64 ? newImage : img)
+      );
+    } catch (e) {
+      console.error(e);
+      setError('Failed to remove background. Please try again.');
+    } finally {
+      setIsLoadingBackgroundRemoval(false);
+    }
+  }, [productImage]);
 
   const handleRemoveLifestyle = useCallback(() => {
     setLifestyleImage(null);
@@ -107,26 +135,81 @@ const App: React.FC = () => {
     setGeneratedImage(null);
     setError(null);
     try {
-      const finalImage = await combineImages(productImage, lifestyleImage, combinationPrompt, selectedResolution);
+      const finalImage = await combineImages(productImage, lifestyleImage, combinationPrompt, combinationModel);
       setGeneratedImage(finalImage);
       setGeneratedHistory(prev => [finalImage, ...prev]);
     } catch (e) {
       console.error(e);
-      setError('Failed to combine images. Please try again.');
+      const errorMessage = e instanceof Error ? e.message : 'Failed to combine images. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoadingResult(false);
     }
-  }, [productImage, lifestyleImage, combinationPrompt, selectedResolution]);
-  
-  const handleOpenPreview = (image: ImageData) => setPreviewImage(image);
-  const handleClosePreview = () => setPreviewImage(null);
+  }, [productImage, lifestyleImage, combinationPrompt, combinationModel]);
+
+  const handleGenerateVideo = useCallback(async () => {
+    if (!generatedImage) {
+        setError('Please create a final scene image first before generating a video.');
+        return;
+    }
+    if (!videoPrompt) {
+        setError('Please enter a prompt to describe the video.');
+        return;
+    }
+
+    setIsLoadingVideo(true);
+    setVideoGenerationStatus('Initializing video generation...');
+    setError(null);
+    let success = false;
+    
+    try {
+        const videoBlob = await generateVideo(generatedImage, videoPrompt, (status) => {
+            setVideoGenerationStatus(status);
+        });
+        const url = URL.createObjectURL(videoBlob);
+        const newVideo: VideoData = {
+            id: Date.now().toString(),
+            url,
+            prompt: videoPrompt,
+        };
+        setVideoHistory(prev => [newVideo, ...prev]);
+        setActiveTab('videos'); // Switch to videos tab to show the result
+        success = true;
+    } catch (e) {
+        console.error(e);
+        const errorMessage = e instanceof Error ? e.message : 'Failed to generate video. Please try again.';
+        setError(errorMessage);
+        setVideoGenerationStatus(`Error: ${errorMessage}`);
+        success = false;
+    } finally {
+        setIsLoadingVideo(false);
+        // Keep status message on error, otherwise clear it after a delay on success
+        if (success) {
+            setTimeout(() => setVideoGenerationStatus(null), 5000);
+        }
+    }
+  }, [generatedImage, videoPrompt]);
+
+  const handleDeleteVideo = useCallback((videoToDelete: VideoData) => {
+      setVideoHistory(prev => prev.filter(v => v.id !== videoToDelete.id));
+      URL.revokeObjectURL(videoToDelete.url); // Clean up blob URL
+      if (previewVideo?.id === videoToDelete.id) {
+          setPreviewVideo(null);
+      }
+  }, [previewVideo]);
+
+  const handleOpenImagePreview = (image: ImageData) => setPreviewImage(image);
+  const handleCloseImagePreview = () => setPreviewImage(null);
+  const handleOpenVideoPreview = (video: VideoData) => setPreviewVideo(video);
+  const handleCloseVideoPreview = () => setPreviewVideo(null);
 
   const handleSelectAndPreviewResult = (image: ImageData) => {
     setGeneratedImage(image);
-    handleOpenPreview(image);
+    handleOpenImagePreview(image);
   };
   
   const isReadyToCombine = useMemo(() => productImage && lifestyleImage, [productImage, lifestyleImage]);
+  const isBusy = useMemo(() => isLoadingResult || isLoadingLifestyle || isLoadingBackgroundRemoval || isLoadingVideo, [isLoadingResult, isLoadingLifestyle, isLoadingBackgroundRemoval, isLoadingVideo]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
@@ -138,20 +221,41 @@ const App: React.FC = () => {
           productHistory={productHistory}
           lifestyleHistory={lifestyleHistory}
           resultHistory={resultHistory}
+          videoHistory={videoHistory}
           onSelectProduct={setProductImage}
           onSelectLifestyle={setLifestyleImage}
           onSelectResult={handleSelectAndPreviewResult}
+          onSelectVideo={handleOpenVideoPreview}
           onProductUpload={handleProductUpload}
           onLifestyleUpload={handleLifestyleUpload}
           onDeleteProduct={handleDeleteProduct}
           onDeleteLifestyle={handleDeleteLifestyle}
           onDeleteResult={handleDeleteResult}
+          onDeleteVideo={handleDeleteVideo}
         />
         <main className="flex-grow p-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
             <div className="flex flex-col space-y-4">
               <h2 className="text-2xl font-bold text-gray-300 text-center">1. Product Image</h2>
-              <ImageUploader onImageUpload={handleProductUpload} title="Upload Product" currentImage={productImage} onRemove={handleRemoveProductImage} />
+              <div className="relative">
+                <ImageUploader onImageUpload={handleProductUpload} title="Upload Product" currentImage={productImage} onRemove={handleRemoveProductImage} />
+                {isLoadingBackgroundRemoval && (
+                  <div className="absolute inset-0 bg-gray-900/80 rounded-xl flex flex-col items-center justify-center z-10">
+                    <Spinner />
+                    <p className="text-gray-400 mt-4 text-center">Removing background...</p>
+                  </div>
+                )}
+              </div>
+               {productImage && (
+                <button
+                  onClick={handleRemoveBackground}
+                  disabled={isBusy}
+                  className="w-full bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-gray-600 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors duration-200 flex items-center justify-center shadow-md"
+                >
+                  <SparklesIcon className="h-5 w-5 mr-2" />
+                  Remove Background
+                </button>
+              )}
             </div>
             <div className="flex flex-col space-y-4">
               <h2 className="text-2xl font-bold text-gray-300 text-center">2. Lifestyle Scene</h2>
@@ -168,12 +272,24 @@ const App: React.FC = () => {
               <ResultDisplay
                 image={generatedImage}
                 isLoading={isLoadingResult}
-                onPreview={generatedImage ? () => handleOpenPreview(generatedImage) : undefined}
+                onPreview={generatedImage ? () => handleOpenImagePreview(generatedImage) : undefined}
               />
             </div>
           </div>
 
-          <div className="mt-6 max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+          <div className="mt-6 max-w-2xl mx-auto">
+             <div className="mb-4">
+                <label className="block text-lg font-semibold text-gray-300 text-center mb-3">
+                  Image Combination Model
+                </label>
+                <ToggleSwitch
+                  option1="Gemini"
+                  option2="Qwen"
+                  value={combinationModel}
+                  onChange={setCombinationModel as (val: 'gemini' | 'qwen') => void}
+                  disabled={isBusy}
+                />
+             </div>
              <div>
                 <label htmlFor="combination-prompt" className="block text-lg font-semibold text-gray-300 text-center mb-2">
                   Refine the Scene (Optional)
@@ -185,37 +301,15 @@ const App: React.FC = () => {
                   className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow duration-200 resize-y"
                   rows={2}
                   placeholder="e.g., Place the product on the table..."
+                  disabled={isBusy}
                 />
              </div>
-             <div>
-                <label className="block text-lg font-semibold text-gray-300 text-center mb-2">
-                  Output Resolution
-                </label>
-                <div className="flex justify-center space-x-2 bg-gray-800 p-1.5 rounded-lg border border-gray-700">
-                  {RESOLUTION_OPTIONS.map(res => (
-                    <button
-                      key={res.label}
-                      onClick={() => setSelectedResolution(res)}
-                      className={`w-full px-4 py-2 text-sm font-bold rounded-md transition-colors duration-200 ${selectedResolution.label === res.label ? 'bg-indigo-600 text-white' : 'bg-transparent text-gray-400 hover:bg-gray-700'}`}
-                    >
-                      {res.label}
-                    </button>
-                  ))}
-                </div>
-             </div>
           </div>
-          
-          {error && (
-            <div className="mt-6 text-center bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
-              <strong className="font-bold">Error: </strong>
-              <span className="block sm:inline">{error}</span>
-            </div>
-          )}
           
           <div className="mt-6 text-center">
               <button
                 onClick={handleCombine}
-                disabled={!isReadyToCombine || isLoadingResult || isLoadingLifestyle}
+                disabled={!isReadyToCombine || isBusy}
                 className="bg-indigo-600 text-white font-bold text-lg py-4 px-10 rounded-full shadow-lg hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center mx-auto"
               >
                 {isLoadingResult ? (
@@ -228,9 +322,78 @@ const App: React.FC = () => {
                 )}
               </button>
           </div>
+
+          {generatedImage && (
+            <div className="mt-8 pt-8 border-t border-gray-700/50 max-w-2xl mx-auto">
+              <div className="text-center mb-4">
+                <h3 className="text-xl font-bold text-gray-300 flex items-center justify-center gap-3">
+                  <VideoIcon className="h-6 w-6 text-green-400" />
+                  4. Animate Your Scene
+                </h3>
+              </div>
+              <div>
+                <label htmlFor="video-prompt" className="block text-lg font-semibold text-gray-300 text-center mb-2">
+                  Describe the motion
+                </label>
+                <textarea
+                  id="video-prompt"
+                  value={videoPrompt}
+                  onChange={(e) => setVideoPrompt(e.target.value)}
+                  className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow duration-200 resize-y"
+                  rows={2}
+                  placeholder="e.g., A slow zoom-in on the product..."
+                  disabled={isLoadingVideo}
+                />
+              </div>
+              <div className="mt-4 text-center">
+                <button
+                  onClick={handleGenerateVideo}
+                  disabled={isBusy}
+                  className="bg-green-600 text-white font-bold text-lg py-3 px-8 rounded-full shadow-lg hover:bg-green-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center mx-auto"
+                >
+                  {isLoadingVideo ? (
+                    <Spinner />
+                  ) : (
+                    <>
+                      <span>Generate Video</span>
+                      <VideoIcon className="ml-3 h-5 w-5" />
+                    </>
+                  )}
+                </button>
+              </div>
+              
+              {videoGenerationStatus && (
+                <div className="mt-6 text-center bg-gray-800 border border-gray-700 text-gray-300 px-4 py-3 rounded-lg" role="status">
+                  <div className="flex items-center justify-center">
+                    {isLoadingVideo && <Spinner />}
+                    <span className="ml-3 font-semibold">{videoGenerationStatus}</span>
+                  </div>
+                </div>
+              )}
+    
+              {error && !videoGenerationStatus && (
+                <div className="mt-6 text-center bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
+                  <strong className="font-bold">Error: </strong>
+                  <span className="block sm:inline">{error}</span>
+                </div>
+              )}
+
+              {videoHistory.length > 0 && !isLoadingVideo && (
+                <div className="mt-6">
+                    <h4 className="text-lg font-bold text-gray-300 text-center mb-2">Latest Video</h4>
+                    <VideoResultDisplay
+                        video={videoHistory[0]}
+                        onPreview={() => handleOpenVideoPreview(videoHistory[0])}
+                    />
+                </div>
+              )}
+            </div>
+          )}
+
         </main>
       </div>
-      <ImagePreviewModal image={previewImage} onClose={handleClosePreview} />
+      <ImagePreviewModal image={previewImage} onClose={handleCloseImagePreview} />
+      <VideoPreviewModal video={previewVideo} onClose={handleCloseVideoPreview} />
     </div>
   );
 };
