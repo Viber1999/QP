@@ -1,9 +1,6 @@
-import { GoogleGenAI, Modality } from "@google/genai";
+// FIX: Import necessary response types from @google/genai.
+import { GoogleGenAI, Modality, GenerateImagesResponse, GenerateContentResponse } from "@google/genai";
 import type { UploadableImageData } from '../types';
-
-if (!process.env.API_KEY) {
-  throw new Error("API_KEY environment variable not set");
-}
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -45,7 +42,8 @@ const withRetry = async <T>(
  */
 export const generateLifestyleImage = async (prompt: string): Promise<UploadableImageData> => {
   try {
-    const response = await withRetry(() => ai.models.generateImages({
+    // FIX: Provide explicit type for withRetry to ensure `response` is correctly typed.
+    const response = await withRetry<GenerateImagesResponse>(() => ai.models.generateImages({
       model: 'imagen-4.0-generate-001',
       prompt: prompt,
       config: {
@@ -76,20 +74,14 @@ export const generateLifestyleImage = async (prompt: string): Promise<Uploadable
  * @param angleImages Additional angles of the product for AI reference.
  * @param lifestyleImage The background lifestyle image.
  * @param userPrompt Custom instructions for the combination process.
- * @param model The AI model to use for the combination.
  * @returns A promise that resolves to the combined image data.
  */
 export const combineImages = async (
   primaryProductImage: UploadableImageData,
   angleImages: UploadableImageData[],
   lifestyleImage: UploadableImageData,
-  userPrompt: string,
-  model: 'gemini' | 'qwen'
+  userPrompt: string
 ): Promise<UploadableImageData> => {
-  if (model === 'qwen') {
-    throw new Error("Qwen model integration is not yet available. Please select Gemini for now.");
-  }
-
   const basePrompt = `The first image is the background scene. The second image is the primary product. The subsequent images are additional angles of the same product for reference. Place the primary product from the second image seamlessly into the scene from the first image. Use the additional angles to accurately render lighting, shadows, perspective, and scale. The output must be only the composed image.`;
 
   const promptText = `${basePrompt}\n\nUser's refinement: ${userPrompt}`;
@@ -106,7 +98,8 @@ export const combineImages = async (
   ];
 
   try {
-    const response = await withRetry(() => ai.models.generateContent({
+    // FIX: Provide explicit type for withRetry to ensure `response` is correctly typed.
+    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image-preview',
       contents: {
         parts: [
@@ -150,7 +143,8 @@ export const removeImageBackground = async (image: UploadableImageData): Promise
   const prompt = "Remove the background from the preceding image. Make the background transparent. The output must be a PNG image of only the main subject, with a transparent background.";
   
   try {
-    const response = await withRetry(() => ai.models.generateContent({
+    // FIX: Provide explicit type for withRetry to ensure `response` is correctly typed.
+    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image-preview',
       contents: {
         parts: [
@@ -202,13 +196,10 @@ export const generateVideo = async (
   prompt: string,
   onStatusUpdate: (status: string) => void
 ): Promise<Blob> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-  }
-  
+  // FIX: Complete the function to handle video generation and return a Blob.
   try {
-    onStatusUpdate("Sending video generation request to Gemini...");
-    let operation = await withRetry(() => ai.models.generateVideos({
+    onStatusUpdate('Starting video generation with VEO...');
+    let operation = await ai.models.generateVideos({
       model: 'veo-2.0-generate-001',
       prompt: prompt,
       image: {
@@ -216,50 +207,40 @@ export const generateVideo = async (
         mimeType: image.mimeType,
       },
       config: {
-        numberOfVideos: 1
-      }
-    }), {
-        onRetry: (attempt) => onStatusUpdate(`Request failed. Retrying... (Attempt ${attempt})`)
+        numberOfVideos: 1,
+      },
     });
-
-    onStatusUpdate("Request accepted. Video generation is in progress. This may take a few minutes...");
     
-    let pollCount = 0;
+    onStatusUpdate('Video generation in progress... This can take a few minutes.');
+    
+    // Poll for completion
     while (!operation.done) {
-      pollCount++;
-      const waitTime = 10000; // 10 seconds
-      onStatusUpdate(`Polling for result (attempt ${pollCount})... Checking again in ${waitTime / 1000} seconds.`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-
-      operation = await withRetry(() => ai.operations.getVideosOperation({ operation: operation }), {
-          maxRetries: 5, // Polling can be flaky, allow more retries.
-          onRetry: (attempt, error) => onStatusUpdate(`Polling failed. Retrying (Attempt ${attempt}). Error: ${error.message.substring(0, 50)}...`)
-      });
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+      onStatusUpdate('Checking video status...');
+      operation = await ai.operations.getVideosOperation({ operation });
     }
-    
-    onStatusUpdate("Video generated successfully! Downloading video data...");
+
+    onStatusUpdate('Video generated! Downloading file...');
 
     const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+
     if (!downloadLink) {
-      throw new Error("Video generation finished, but no download link was provided.");
-    }
-    
-    const response = await withRetry(() => fetch(`${downloadLink}&key=${process.env.API_KEY}`), {
-        onRetry: (attempt) => onStatusUpdate(`Download failed. Retrying... (Attempt ${attempt})`)
-    });
-    
-    if (!response.ok) {
-        throw new Error(`Failed to download video: ${response.statusText}`);
+      throw new Error('Video generation finished, but no download link was found.');
     }
 
-    onStatusUpdate("Download complete.");
-    const videoBlob = await response.blob();
+    const videoResponse = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+    if (!videoResponse.ok) {
+        throw new Error(`Failed to download video file. Status: ${videoResponse.statusText}`);
+    }
+    
+    const videoBlob = await videoResponse.blob();
+    onStatusUpdate('Video download complete!');
     return videoBlob;
 
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     console.error("Error generating video:", error);
-    onStatusUpdate(`Error during video generation: ${errorMessage}`);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+    onStatusUpdate(`Error: ${errorMessage}`);
     throw new Error(`Failed to generate video: ${errorMessage}`);
   }
 };

@@ -1,18 +1,26 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { LifestyleGenerator } from './components/LifestyleGenerator';
-import { ResultDisplay } from './components/ResultDisplay';
+
+// Components
+import { ApiKeyErrorOverlay } from './components/ApiKeyErrorOverlay';
 import { Header } from './components/Header';
-import { ArrowIcon, SparklesIcon, VideoIcon } from './components/IconComponents';
-import { Sidebar, Tab } from './components/Sidebar';
-import { ProductWorkspace } from './components/ProductWorkspace';
-import { generateLifestyleImage, combineImages, generateVideo } from './services/geminiService';
-import { urlToUploadableImageData, base64ToBlob } from './utils/dataUtils';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
-import { VideoPreviewModal } from './components/VideoPreviewModal';
-import type { UploadableImageData, StoredImageData, StoredVideoData, ProductData } from './types';
+import { ArrowIcon, SparklesIcon, VideoIcon } from './components/IconComponents';
+import { LifestyleGenerator } from './components/LifestyleGenerator';
+import { ProductWorkspace } from './components/ProductWorkspace';
+import { ResultDisplay } from './components/ResultDisplay';
+import { Sidebar, Tab } from './components/Sidebar';
 import { Spinner } from './components/Spinner';
-import { ToggleSwitch } from './components/ToggleSwitch';
+import { VideoPreviewModal } from './components/VideoPreviewModal';
 import { VideoResultDisplay } from './components/VideoResultDisplay';
+
+// Services
+import { generateLifestyleImage, combineImages, generateVideo } from './services/geminiService';
+
+// Utils
+import { urlToUploadableImageData, base64ToBlob } from './utils/dataUtils';
+
+// Types
+import type { UploadableImageData, StoredImageData, StoredVideoData, ProductData } from './types';
 
 const App: React.FC = () => {
   // Workspace state
@@ -28,7 +36,6 @@ const App: React.FC = () => {
 
   // UI State
   const [activeTab, setActiveTab] = useState<Tab>('products');
-  const [combinationModel, setCombinationModel] = useState<'gemini' | 'qwen'>('gemini');
   const [combinationPrompt, setCombinationPrompt] = useState<string>('Place these glasses in scene, replace existing glasses if present.');
   const [videoPrompt, setVideoPrompt] = useState<string>('Make the scene cinematic with a gentle camera pan from left to right.');
   const [isLoadingLifestyle, setIsLoadingLifestyle] = useState<boolean>(false);
@@ -39,6 +46,15 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<StoredImageData | null>(null);
   const [previewVideo, setPreviewVideo] = useState<StoredVideoData | null>(null);
+  const [isApiKeyMissing, setIsApiKeyMissing] = useState<boolean>(false);
+
+  useEffect(() => {
+    // This check assumes the environment variable is either present or not at build/load time.
+    if (!process.env.API_KEY) {
+      console.error("API_KEY environment variable is not set.");
+      setIsApiKeyMissing(true);
+    }
+  }, []);
   
   const uploadableToStoredImage = (image: UploadableImageData): StoredImageData => {
     const imageBlob = base64ToBlob(image.base64, image.mimeType);
@@ -167,7 +183,7 @@ const App: React.FC = () => {
       ]);
 
       setResultStatus("Combining images with Gemini...");
-      const finalImage = await combineImages(primaryProductForApi, angleImagesForApi, lifestyleForApi, combinationPrompt, combinationModel);
+      const finalImage = await combineImages(primaryProductForApi, angleImagesForApi, lifestyleForApi, combinationPrompt);
       
       setResultStatus("Saving final image...");
       const storedImage = uploadableToStoredImage(finalImage);
@@ -182,7 +198,7 @@ const App: React.FC = () => {
       setIsLoadingResult(false);
       setResultStatus(null);
     }
-  }, [selectedProduct, lifestyleImage, combinationPrompt, combinationModel]);
+  }, [selectedProduct, lifestyleImage, combinationPrompt]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!generatedImage) {
@@ -238,9 +254,11 @@ const App: React.FC = () => {
   
   const isReadyToCombine = useMemo(() => selectedProduct && lifestyleImage, [selectedProduct, lifestyleImage]);
   const isBusy = useMemo(() => isLoadingResult || isLoadingLifestyle || isLoadingVideo, [isLoadingResult, isLoadingLifestyle, isLoadingVideo]);
+  const isDisabled = useMemo(() => isBusy || isApiKeyMissing, [isBusy, isApiKeyMissing]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
+      {isApiKeyMissing && <ApiKeyErrorOverlay />}
       <Header />
       <div className="flex-grow flex">
         <Sidebar 
@@ -273,7 +291,7 @@ const App: React.FC = () => {
                 onAddAngle={handleAddAngle}
                 onDeleteAngle={handleDeleteAngle}
                 onDeselect={handleDeselectProduct}
-                isBusy={isBusy}
+                isBusy={isDisabled}
               />
             </div>
             
@@ -285,6 +303,7 @@ const App: React.FC = () => {
                 onRemove={handleRemoveLifestyle}
                 isLoading={isLoadingLifestyle}
                 currentImage={lifestyleImage}
+                isDisabled={isDisabled}
               />
             </div>
             <div className="flex flex-col space-y-4">
@@ -299,18 +318,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="mt-6 max-w-2xl mx-auto">
-             <div className="mb-4">
-                <label className="block text-lg font-semibold text-gray-300 text-center mb-3">
-                  Image Combination Model
-                </label>
-                <ToggleSwitch
-                  option1="Gemini"
-                  option2="Qwen"
-                  value={combinationModel}
-                  onChange={setCombinationModel as (val: 'gemini' | 'qwen') => void}
-                  disabled={isBusy}
-                />
-             </div>
              <div>
                 <label htmlFor="combination-prompt" className="block text-lg font-semibold text-gray-300 text-center mb-2">
                   Refine the Scene (Optional)
@@ -322,7 +329,7 @@ const App: React.FC = () => {
                   className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow duration-200 resize-y"
                   rows={2}
                   placeholder="e.g., Place the product on the table..."
-                  disabled={isBusy}
+                  disabled={isDisabled}
                 />
              </div>
           </div>
@@ -330,7 +337,7 @@ const App: React.FC = () => {
           <div className="mt-6 text-center">
               <button
                 onClick={handleCombine}
-                disabled={!isReadyToCombine || isBusy}
+                disabled={!isReadyToCombine || isDisabled}
                 className="bg-indigo-600 text-white font-bold text-lg py-4 px-10 rounded-full shadow-lg hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center mx-auto"
               >
                 {isLoadingResult ? (
@@ -363,13 +370,13 @@ const App: React.FC = () => {
                   className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-shadow duration-200 resize-y"
                   rows={2}
                   placeholder="e.g., A slow zoom-in on the product..."
-                  disabled={isLoadingVideo}
+                  disabled={isLoadingVideo || isApiKeyMissing}
                 />
               </div>
               <div className="mt-4 text-center">
                 <button
                   onClick={handleGenerateVideo}
-                  disabled={isBusy}
+                  disabled={isDisabled}
                   className="bg-green-600 text-white font-bold text-lg py-3 px-8 rounded-full shadow-lg hover:bg-green-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center mx-auto"
                 >
                   {isLoadingVideo ? (
