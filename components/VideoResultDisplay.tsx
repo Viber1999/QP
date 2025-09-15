@@ -1,8 +1,8 @@
 import React from 'react';
-import type { VideoData } from '../types';
+import type { StoredVideoData } from '../types';
 
 interface VideoResultDisplayProps {
-  video: VideoData;
+  video: StoredVideoData;
   onPreview: () => void;
 }
 

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
-import type { ImageData } from '../types';
+import type { UploadableImageData } from '../types';
 
 if (!process.env.API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -43,7 +43,7 @@ const withRetry = async <T>(
  * @param prompt The text prompt to generate the image from.
  * @returns A promise that resolves to the generated image data.
  */
-export const generateLifestyleImage = async (prompt: string): Promise<ImageData> => {
+export const generateLifestyleImage = async (prompt: string): Promise<UploadableImageData> => {
   try {
     const response = await withRetry(() => ai.models.generateImages({
       model: 'imagen-4.0-generate-001',
@@ -71,50 +71,46 @@ export const generateLifestyleImage = async (prompt: string): Promise<ImageData>
 };
 
 /**
- * Combines a product image with a lifestyle image.
- * @param productImage The product image data.
- * @param lifestyleImage The background lifestyle image data.
+ * Combines a product image (with multiple angles) with a lifestyle image.
+ * @param primaryProductImage The main product image to place in the scene.
+ * @param angleImages Additional angles of the product for AI reference.
+ * @param lifestyleImage The background lifestyle image.
  * @param userPrompt Custom instructions for the combination process.
  * @param model The AI model to use for the combination.
  * @returns A promise that resolves to the combined image data.
  */
 export const combineImages = async (
-  productImage: ImageData,
-  lifestyleImage: ImageData,
+  primaryProductImage: UploadableImageData,
+  angleImages: UploadableImageData[],
+  lifestyleImage: UploadableImageData,
   userPrompt: string,
   model: 'gemini' | 'qwen'
-): Promise<ImageData> => {
+): Promise<UploadableImageData> => {
   if (model === 'qwen') {
-    // Placeholder for Qwen API integration.
-    // In a real implementation, this would call the Qwen API.
-    // For now, we'll throw an error to indicate it's not implemented.
     throw new Error("Qwen model integration is not yet available. Please select Gemini for now.");
   }
-  
-  // Changed prompt to reflect the new image order (background first, then product).
-  const basePrompt = `The first image is the background scene, and the second image is the product. Place the product from the second image seamlessly into the scene from the first image. Match lighting, shadows, perspective, and scale. The output must be only the composed image.`;
-  
+
+  const basePrompt = `The first image is the background scene. The second image is the primary product. The subsequent images are additional angles of the same product for reference. Place the primary product from the second image seamlessly into the scene from the first image. Use the additional angles to accurately render lighting, shadows, perspective, and scale. The output must be only the composed image.`;
+
   const promptText = `${basePrompt}\n\nUser's refinement: ${userPrompt}`;
   
+  const imageParts = [
+    // 1. Background
+    { inlineData: { data: lifestyleImage.base64, mimeType: lifestyleImage.mimeType } },
+    // 2. Primary Product
+    { inlineData: { data: primaryProductImage.base64, mimeType: primaryProductImage.mimeType } },
+    // 3. Angle Images for reference
+    ...angleImages.map(img => ({
+      inlineData: { data: img.base64, mimeType: img.mimeType },
+    })),
+  ];
+
   try {
     const response = await withRetry(() => ai.models.generateContent({
       model: 'gemini-2.5-flash-image-preview',
       contents: {
         parts: [
-          // Background first for more stable generation
-          {
-            inlineData: {
-              data: lifestyleImage.base64,
-              mimeType: lifestyleImage.mimeType,
-            },
-          },
-          // Then product
-          {
-            inlineData: {
-              data: productImage.base64,
-              mimeType: productImage.mimeType,
-            },
-          },
+          ...imageParts,
           // Instructions last
           {
             text: promptText,
@@ -149,7 +145,7 @@ export const combineImages = async (
  * @param image The image to process.
  * @returns A promise that resolves to the image data with a transparent background.
  */
-export const removeImageBackground = async (image: ImageData): Promise<ImageData> => {
+export const removeImageBackground = async (image: UploadableImageData): Promise<UploadableImageData> => {
   // Simplified prompt for better stability.
   const prompt = "Remove the background from the preceding image. Make the background transparent. The output must be a PNG image of only the main subject, with a transparent background.";
   
@@ -202,7 +198,7 @@ export const removeImageBackground = async (image: ImageData): Promise<ImageData
  * @returns A promise that resolves to the generated video blob.
  */
 export const generateVideo = async (
-  image: ImageData,
+  image: UploadableImageData,
   prompt: string,
   onStatusUpdate: (status: string) => void
 ): Promise<Blob> => {

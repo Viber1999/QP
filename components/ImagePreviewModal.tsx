@@ -1,9 +1,9 @@
 import React from 'react';
-import type { ImageData } from '../types';
+import type { StoredImageData } from '../types';
 import { CloseIcon, DownloadIcon } from './IconComponents';
 
 interface ImagePreviewModalProps {
-  image: ImageData | null;
+  image: StoredImageData | null;
   onClose: () => void;
 }
 
@@ -14,7 +14,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ image, onC
 
   const handleDownload = () => {
     const link = document.createElement('a');
-    link.href = `data:${image.mimeType};base64,${image.base64}`;
+    link.href = image.url;
     link.download = `product-scene-preview-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
@@ -56,7 +56,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ image, onC
         </div>
         <div className="flex-grow flex items-center justify-center overflow-hidden min-h-0">
             <img
-            src={`data:${image.mimeType};base64,${image.base64}`}
+            src={image.url}
             alt="Generated Scene Preview"
             className="max-w-full max-h-full object-contain rounded-lg"
             />

@@ -1,16 +1,17 @@
 import React from 'react';
-import type { ImageData } from '../types';
-import { CloseIcon, DownloadIcon } from './IconComponents';
+import type { StoredImageData } from '../types';
+import { CloseIcon, DownloadIcon, CollectionIcon } from './IconComponents';
 
 interface ImageThumbnailProps {
-  image: ImageData;
+  image: StoredImageData;
   onClick: () => void;
   onDelete: () => void;
   onDownload?: () => void;
   showDownload?: boolean;
+  angleCount?: number;
 }
 
-export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ image, onClick, onDelete, onDownload, showDownload }) => {
+export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ image, onClick, onDelete, onDownload, showDownload, angleCount = 0 }) => {
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent onClick from firing when deleting
     onDelete();
@@ -27,7 +28,7 @@ export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ image, onClick, 
       onClick={onClick}
     >
       <img
-        src={`data:${image.mimeType};base64,${image.base64}`}
+        src={image.url}
         alt="Thumbnail"
         className="w-full h-full object-cover"
       />
@@ -51,6 +52,16 @@ export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ image, onClick, 
           >
             <DownloadIcon className="h-4 w-4" />
         </button>
+      )}
+      {angleCount > 0 && (
+         <div
+            className="absolute bottom-1.5 left-1.5 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded-full text-white text-xs font-bold opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center"
+            aria-label={`${angleCount} additional angles`}
+            title={`${angleCount} additional angles`}
+          >
+            <CollectionIcon className="h-3 w-3 mr-1" />
+            <span>+{angleCount}</span>
+        </div>
       )}
     </div>
   );

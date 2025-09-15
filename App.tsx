@@ -1,29 +1,30 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { ImageUploader } from './components/ImageUploader';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { LifestyleGenerator } from './components/LifestyleGenerator';
 import { ResultDisplay } from './components/ResultDisplay';
 import { Header } from './components/Header';
 import { ArrowIcon, SparklesIcon, VideoIcon } from './components/IconComponents';
 import { Sidebar, Tab } from './components/Sidebar';
-import { generateLifestyleImage, combineImages, removeImageBackground, generateVideo } from './services/geminiService';
+import { ProductWorkspace } from './components/ProductWorkspace';
+import { generateLifestyleImage, combineImages, generateVideo } from './services/geminiService';
+import { urlToUploadableImageData, base64ToBlob } from './utils/dataUtils';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { VideoPreviewModal } from './components/VideoPreviewModal';
-import type { ImageData, VideoData } from './types';
+import type { UploadableImageData, StoredImageData, StoredVideoData, ProductData } from './types';
 import { Spinner } from './components/Spinner';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { VideoResultDisplay } from './components/VideoResultDisplay';
 
 const App: React.FC = () => {
   // Workspace state
-  const [productImage, setProductImage] = useState<ImageData | null>(null);
-  const [lifestyleImage, setLifestyleImage] = useState<ImageData | null>(null);
-  const [generatedImage, setGeneratedImage] = useState<ImageData | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<ProductData | null>(null);
+  const [lifestyleImage, setLifestyleImage] = useState<StoredImageData | null>(null);
+  const [generatedImage, setGeneratedImage] = useState<StoredImageData | null>(null);
   
   // History state
-  const [productHistory, setProductHistory] = useState<ImageData[]>([]);
-  const [lifestyleHistory, setLifestyleHistory] = useState<ImageData[]>([]);
-  const [resultHistory, setGeneratedHistory] = useState<ImageData[]>([]);
-  const [videoHistory, setVideoHistory] = useState<VideoData[]>([]);
+  const [productHistory, setProductHistory] = useState<ProductData[]>([]);
+  const [lifestyleHistory, setLifestyleHistory] = useState<StoredImageData[]>([]);
+  const [resultHistory, setGeneratedHistory] = useState<StoredImageData[]>([]);
+  const [videoHistory, setVideoHistory] = useState<StoredVideoData[]>([]);
 
   // UI State
   const [activeTab, setActiveTab] = useState<Tab>('products');
@@ -32,25 +33,67 @@ const App: React.FC = () => {
   const [videoPrompt, setVideoPrompt] = useState<string>('Make the scene cinematic with a gentle camera pan from left to right.');
   const [isLoadingLifestyle, setIsLoadingLifestyle] = useState<boolean>(false);
   const [isLoadingResult, setIsLoadingResult] = useState<boolean>(false);
-  const [isLoadingBackgroundRemoval, setIsLoadingBackgroundRemoval] = useState<boolean>(false);
+  const [resultStatus, setResultStatus] = useState<string | null>(null);
   const [isLoadingVideo, setIsLoadingVideo] = useState<boolean>(false);
   const [videoGenerationStatus, setVideoGenerationStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<ImageData | null>(null);
-  const [previewVideo, setPreviewVideo] = useState<VideoData | null>(null);
+  const [previewImage, setPreviewImage] = useState<StoredImageData | null>(null);
+  const [previewVideo, setPreviewVideo] = useState<StoredVideoData | null>(null);
+  
+  const uploadableToStoredImage = (image: UploadableImageData): StoredImageData => {
+    const imageBlob = base64ToBlob(image.base64, image.mimeType);
+    const url = URL.createObjectURL(imageBlob);
+    return { id: crypto.randomUUID(), url, mimeType: image.mimeType };
+  };
 
-  const handleProductUpload = useCallback((image: ImageData) => {
-    setProductImage(image);
-    setProductHistory(prev => [image, ...prev.filter(img => img.base64 !== image.base64)]);
+  const handleCreateProduct = useCallback(async (image: UploadableImageData) => {
+    const newStoredImage = uploadableToStoredImage(image);
+    const newProduct: ProductData = {
+      id: crypto.randomUUID(),
+      primaryImage: newStoredImage,
+      angleImages: [],
+    };
+    setSelectedProduct(newProduct);
+    setProductHistory(prev => [newProduct, ...prev]);
   }, []);
 
-  const handleRemoveProductImage = useCallback(() => {
-    setProductImage(null);
+  const handleAddAngle = useCallback(async (image: UploadableImageData) => {
+    if (!selectedProduct) {
+      setError('No product selected to add an angle to.');
+      return;
+    }
+    const newAngle = uploadableToStoredImage(image);
+    const updatedProduct = {
+      ...selectedProduct,
+      angleImages: [...selectedProduct.angleImages, newAngle],
+    };
+    setSelectedProduct(updatedProduct);
+    setProductHistory(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+  }, [selectedProduct]);
+  
+  const handleUpdateProduct = useCallback((updatedProduct: ProductData) => {
+    setSelectedProduct(updatedProduct);
+    setProductHistory(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+  }, []);
+  
+  const handleDeleteAngle = useCallback((angleToDelete: StoredImageData) => {
+    if (!selectedProduct) return;
+    URL.revokeObjectURL(angleToDelete.url);
+    const updatedProduct = {
+        ...selectedProduct,
+        angleImages: selectedProduct.angleImages.filter(img => img.id !== angleToDelete.id),
+    };
+    handleUpdateProduct(updatedProduct);
+  }, [selectedProduct, handleUpdateProduct]);
+
+  const handleDeselectProduct = useCallback(() => {
+    setSelectedProduct(null);
   }, []);
 
-  const handleLifestyleUpload = useCallback((image: ImageData) => {
-    setLifestyleImage(image);
-    setLifestyleHistory(prev => [image, ...prev.filter(img => img.base64 !== image.base64)]);
+  const handleLifestyleUpload = useCallback(async (image: UploadableImageData) => {
+    const storedImage = uploadableToStoredImage(image);
+    setLifestyleImage(storedImage);
+    setLifestyleHistory(prev => [storedImage, ...prev.filter(img => img.id !== storedImage.id)]);
   }, []);
 
   const handleGenerateLifestyle = useCallback(async (prompt: string) => {
@@ -63,8 +106,9 @@ const App: React.FC = () => {
     setError(null);
     try {
       const imageData = await generateLifestyleImage(prompt);
-      setLifestyleImage(imageData);
-      setLifestyleHistory(prev => [imageData, ...prev]);
+      const storedImage = uploadableToStoredImage(imageData);
+      setLifestyleImage(storedImage);
+      setLifestyleHistory(prev => [storedImage, ...prev]);
     } catch (e) {
       console.error(e);
       setError('Failed to generate lifestyle image. Please try again.');
@@ -73,61 +117,41 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleRemoveBackground = useCallback(async () => {
-    if (!productImage) {
-      setError('Please select a product image first.');
-      return;
-    }
-    setIsLoadingBackgroundRemoval(true);
-    setError(null);
-    const originalImage = productImage; // Keep original for history update
-
-    try {
-      const newImage = await removeImageBackground(productImage);
-      setProductImage(newImage);
-      // Update history as well
-      setProductHistory(prev => 
-        prev.map(img => img.base64 === originalImage.base64 ? newImage : img)
-      );
-    } catch (e) {
-      console.error(e);
-      setError('Failed to remove background. Please try again.');
-    } finally {
-      setIsLoadingBackgroundRemoval(false);
-    }
-  }, [productImage]);
-
   const handleRemoveLifestyle = useCallback(() => {
     setLifestyleImage(null);
   }, []);
   
-  const handleDeleteProduct = useCallback((imageToDelete: ImageData) => {
-    setProductHistory(prev => prev.filter(p => p.base64 !== imageToDelete.base64));
-    if (productImage?.base64 === imageToDelete.base64) {
-      setProductImage(null);
+  const handleDeleteProduct = useCallback(async (productToDelete: ProductData) => {
+    setProductHistory(prev => prev.filter(p => p.id !== productToDelete.id));
+    if (selectedProduct?.id === productToDelete.id) {
+      setSelectedProduct(null);
     }
-  }, [productImage]);
+    // Revoke blob URLs to prevent memory leaks
+    URL.revokeObjectURL(productToDelete.primaryImage.url);
+    productToDelete.angleImages.forEach(img => URL.revokeObjectURL(img.url));
+  }, [selectedProduct]);
 
-  const handleDeleteLifestyle = useCallback((imageToDelete: ImageData) => {
-    setLifestyleHistory(prev => prev.filter(l => l.base64 !== imageToDelete.base64));
-    if (lifestyleImage?.base64 === imageToDelete.base64) {
+  const handleDeleteLifestyle = useCallback(async (imageToDelete: StoredImageData) => {
+    setLifestyleHistory(prev => prev.filter(l => l.id !== imageToDelete.id));
+    if (lifestyleImage?.id === imageToDelete.id) {
       setLifestyleImage(null);
     }
+    URL.revokeObjectURL(imageToDelete.url);
   }, [lifestyleImage]);
 
-  const handleDeleteResult = useCallback((imageToDelete: ImageData) => {
-    setGeneratedHistory(prev => prev.filter(r => r.base64 !== imageToDelete.base64));
-    if (generatedImage?.base64 === imageToDelete.base64) {
+  const handleDeleteResult = useCallback(async(imageToDelete: StoredImageData) => {
+    setGeneratedHistory(prev => prev.filter(r => r.id !== imageToDelete.id));
+    if (generatedImage?.id === imageToDelete.id) {
       setGeneratedImage(null);
     }
-    if (previewImage?.base64 === imageToDelete.base64) {
+    if (previewImage?.id === imageToDelete.id) {
       setPreviewImage(null);
     }
+    URL.revokeObjectURL(imageToDelete.url);
   }, [generatedImage, previewImage]);
 
-
   const handleCombine = useCallback(async () => {
-    if (!productImage || !lifestyleImage) {
+    if (!selectedProduct || !lifestyleImage) {
       setError('Please select a product and a lifestyle image from the workspace.');
       return;
     }
@@ -135,17 +159,30 @@ const App: React.FC = () => {
     setGeneratedImage(null);
     setError(null);
     try {
-      const finalImage = await combineImages(productImage, lifestyleImage, combinationPrompt, combinationModel);
-      setGeneratedImage(finalImage);
-      setGeneratedHistory(prev => [finalImage, ...prev]);
+      setResultStatus("Preparing images...");
+      const [primaryProductForApi, lifestyleForApi, ...angleImagesForApi] = await Promise.all([
+          urlToUploadableImageData(selectedProduct.primaryImage.url),
+          urlToUploadableImageData(lifestyleImage.url),
+          ...selectedProduct.angleImages.map(img => urlToUploadableImageData(img.url)),
+      ]);
+
+      setResultStatus("Combining images with Gemini...");
+      const finalImage = await combineImages(primaryProductForApi, angleImagesForApi, lifestyleForApi, combinationPrompt, combinationModel);
+      
+      setResultStatus("Saving final image...");
+      const storedImage = uploadableToStoredImage(finalImage);
+
+      setGeneratedImage(storedImage);
+      setGeneratedHistory(prev => [storedImage, ...prev]);
     } catch (e) {
       console.error(e);
       const errorMessage = e instanceof Error ? e.message : 'Failed to combine images. Please try again.';
       setError(errorMessage);
     } finally {
       setIsLoadingResult(false);
+      setResultStatus(null);
     }
-  }, [productImage, lifestyleImage, combinationPrompt, combinationModel]);
+  }, [selectedProduct, lifestyleImage, combinationPrompt, combinationModel]);
 
   const handleGenerateVideo = useCallback(async () => {
     if (!generatedImage) {
@@ -160,56 +197,47 @@ const App: React.FC = () => {
     setIsLoadingVideo(true);
     setVideoGenerationStatus('Initializing video generation...');
     setError(null);
-    let success = false;
     
     try {
-        const videoBlob = await generateVideo(generatedImage, videoPrompt, (status) => {
-            setVideoGenerationStatus(status);
-        });
+        const imageForApi = await urlToUploadableImageData(generatedImage.url);
+        const videoBlob = await generateVideo(imageForApi, videoPrompt, setVideoGenerationStatus);
+        
         const url = URL.createObjectURL(videoBlob);
-        const newVideo: VideoData = {
-            id: Date.now().toString(),
-            url,
-            prompt: videoPrompt,
-        };
+        const newVideo: StoredVideoData = { id: crypto.randomUUID(), url, prompt: videoPrompt };
+
         setVideoHistory(prev => [newVideo, ...prev]);
-        setActiveTab('videos'); // Switch to videos tab to show the result
-        success = true;
+        setActiveTab('videos'); 
+        setTimeout(() => setVideoGenerationStatus(null), 5000);
     } catch (e) {
         console.error(e);
         const errorMessage = e instanceof Error ? e.message : 'Failed to generate video. Please try again.';
         setError(errorMessage);
         setVideoGenerationStatus(`Error: ${errorMessage}`);
-        success = false;
     } finally {
         setIsLoadingVideo(false);
-        // Keep status message on error, otherwise clear it after a delay on success
-        if (success) {
-            setTimeout(() => setVideoGenerationStatus(null), 5000);
-        }
     }
   }, [generatedImage, videoPrompt]);
 
-  const handleDeleteVideo = useCallback((videoToDelete: VideoData) => {
+  const handleDeleteVideo = useCallback(async (videoToDelete: StoredVideoData) => {
       setVideoHistory(prev => prev.filter(v => v.id !== videoToDelete.id));
-      URL.revokeObjectURL(videoToDelete.url); // Clean up blob URL
       if (previewVideo?.id === videoToDelete.id) {
           setPreviewVideo(null);
       }
+      URL.revokeObjectURL(videoToDelete.url);
   }, [previewVideo]);
 
-  const handleOpenImagePreview = (image: ImageData) => setPreviewImage(image);
+  const handleOpenImagePreview = (image: StoredImageData) => setPreviewImage(image);
   const handleCloseImagePreview = () => setPreviewImage(null);
-  const handleOpenVideoPreview = (video: VideoData) => setPreviewVideo(video);
+  const handleOpenVideoPreview = (video: StoredVideoData) => setPreviewVideo(video);
   const handleCloseVideoPreview = () => setPreviewVideo(null);
 
-  const handleSelectAndPreviewResult = (image: ImageData) => {
+  const handleSelectAndPreviewResult = (image: StoredImageData) => {
     setGeneratedImage(image);
     handleOpenImagePreview(image);
   };
   
-  const isReadyToCombine = useMemo(() => productImage && lifestyleImage, [productImage, lifestyleImage]);
-  const isBusy = useMemo(() => isLoadingResult || isLoadingLifestyle || isLoadingBackgroundRemoval || isLoadingVideo, [isLoadingResult, isLoadingLifestyle, isLoadingBackgroundRemoval, isLoadingVideo]);
+  const isReadyToCombine = useMemo(() => selectedProduct && lifestyleImage, [selectedProduct, lifestyleImage]);
+  const isBusy = useMemo(() => isLoadingResult || isLoadingLifestyle || isLoadingVideo, [isLoadingResult, isLoadingLifestyle, isLoadingVideo]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans flex flex-col">
@@ -222,11 +250,11 @@ const App: React.FC = () => {
           lifestyleHistory={lifestyleHistory}
           resultHistory={resultHistory}
           videoHistory={videoHistory}
-          onSelectProduct={setProductImage}
+          onSelectProduct={setSelectedProduct}
           onSelectLifestyle={setLifestyleImage}
           onSelectResult={handleSelectAndPreviewResult}
           onSelectVideo={handleOpenVideoPreview}
-          onProductUpload={handleProductUpload}
+          onProductUpload={handleCreateProduct}
           onLifestyleUpload={handleLifestyleUpload}
           onDeleteProduct={handleDeleteProduct}
           onDeleteLifestyle={handleDeleteLifestyle}
@@ -235,28 +263,20 @@ const App: React.FC = () => {
         />
         <main className="flex-grow p-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+            
             <div className="flex flex-col space-y-4">
               <h2 className="text-2xl font-bold text-gray-300 text-center">1. Product Image</h2>
-              <div className="relative">
-                <ImageUploader onImageUpload={handleProductUpload} title="Upload Product" currentImage={productImage} onRemove={handleRemoveProductImage} />
-                {isLoadingBackgroundRemoval && (
-                  <div className="absolute inset-0 bg-gray-900/80 rounded-xl flex flex-col items-center justify-center z-10">
-                    <Spinner />
-                    <p className="text-gray-400 mt-4 text-center">Removing background...</p>
-                  </div>
-                )}
-              </div>
-               {productImage && (
-                <button
-                  onClick={handleRemoveBackground}
-                  disabled={isBusy}
-                  className="w-full bg-gray-700 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-gray-600 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors duration-200 flex items-center justify-center shadow-md"
-                >
-                  <SparklesIcon className="h-5 w-5 mr-2" />
-                  Remove Background
-                </button>
-              )}
+              <ProductWorkspace
+                product={selectedProduct}
+                onCreateProduct={handleCreateProduct}
+                onUpdateProduct={handleUpdateProduct}
+                onAddAngle={handleAddAngle}
+                onDeleteAngle={handleDeleteAngle}
+                onDeselect={handleDeselectProduct}
+                isBusy={isBusy}
+              />
             </div>
+            
             <div className="flex flex-col space-y-4">
               <h2 className="text-2xl font-bold text-gray-300 text-center">2. Lifestyle Scene</h2>
               <LifestyleGenerator
@@ -272,6 +292,7 @@ const App: React.FC = () => {
               <ResultDisplay
                 image={generatedImage}
                 isLoading={isLoadingResult}
+                loadingText={resultStatus}
                 onPreview={generatedImage ? () => handleOpenImagePreview(generatedImage) : undefined}
               />
             </div>
@@ -313,7 +334,7 @@ const App: React.FC = () => {
                 className="bg-indigo-600 text-white font-bold text-lg py-4 px-10 rounded-full shadow-lg hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center mx-auto"
               >
                 {isLoadingResult ? (
-                  <span>Creating Scene...</span>
+                  <span>{resultStatus || 'Creating Scene...'}</span>
                 ) : (
                   <>
                     <span>Create Magic Scene</span>
@@ -371,7 +392,7 @@ const App: React.FC = () => {
                 </div>
               )}
     
-              {error && !videoGenerationStatus && (
+              {error && (
                 <div className="mt-6 text-center bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
                   <strong className="font-bold">Error: </strong>
                   <span className="block sm:inline">{error}</span>

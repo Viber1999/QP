@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import type { ImageData } from '../types';
+import type { UploadableImageData, StoredImageData } from '../types';
 import { ImageUploader } from './ImageUploader';
 import { CloseIcon, SparklesIcon } from './IconComponents';
 import { Spinner } from './Spinner';
 
 interface LifestyleGeneratorProps {
-  onUpload: (imageData: ImageData) => void;
+  onUpload: (imageData: UploadableImageData) => void;
   onGenerate: (prompt: string) => void;
   onRemove: () => void;
   isLoading: boolean;
-  currentImage: ImageData | null;
+  currentImage: StoredImageData | null;
 }
 
 type Mode = 'upload' | 'generate';
@@ -35,7 +35,7 @@ export const LifestyleGenerator: React.FC<LifestyleGeneratorProps> = ({ onUpload
     if (currentImage && !isLoading) {
         return (
             <div className="relative w-full h-80 bg-gray-800/50 rounded-xl border-2 border-gray-700 flex items-center justify-center p-2">
-                <img src={`data:${currentImage.mimeType};base64,${currentImage.base64}`} alt="Lifestyle scene" className="max-w-full max-h-full object-contain rounded-lg" />
+                <img src={currentImage.url} alt="Lifestyle scene" className="max-w-full max-h-full object-contain rounded-lg" />
                  <button
                     onClick={onRemove}
                     className="absolute top-2 right-2 bg-black/60 p-1.5 rounded-full text-white hover:bg-black/80 transition-colors duration-200"
@@ -49,7 +49,7 @@ export const LifestyleGenerator: React.FC<LifestyleGeneratorProps> = ({ onUpload
     }
 
     const TABS_CONTENT = {
-      upload: <ImageUploader onImageUpload={onUpload} title="Upload Lifestyle Scene" currentImage={currentImage} />,
+      upload: <ImageUploader onImageUpload={onUpload} title="Upload Lifestyle Scene" currentImage={null} />, // Pass null as we are in upload mode
       generate: (
          <div className="w-full h-80 bg-gray-800/50 rounded-b-xl rounded-tr-xl border-2 border-l-0 border-gray-700 flex flex-col items-center justify-center p-6">
           <form onSubmit={handleSubmit} className="w-full flex flex-col h-full">

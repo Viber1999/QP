@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import type { ImageData, VideoData } from '../types';
+import type { UploadableImageData, StoredImageData, StoredVideoData, ProductData } from '../types';
 import { ImageThumbnail } from './ImageThumbnail';
 import { VideoThumbnail } from './VideoThumbnail';
 import { ProductIcon, LandscapeIcon, CollectionIcon, PlusIcon, VideoIcon } from './IconComponents';
@@ -9,20 +9,20 @@ export type Tab = 'products' | 'lifestyles' | 'results' | 'videos';
 interface SidebarProps {
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
-  productHistory: ImageData[];
-  lifestyleHistory: ImageData[];
-  resultHistory: ImageData[];
-  videoHistory: VideoData[];
-  onSelectProduct: (image: ImageData) => void;
-  onSelectLifestyle: (image: ImageData) => void;
-  onSelectResult: (image: ImageData) => void;
-  onSelectVideo: (video: VideoData) => void;
-  onProductUpload: (image: ImageData) => void;
-  onLifestyleUpload: (image: ImageData) => void;
-  onDeleteProduct: (image: ImageData) => void;
-  onDeleteLifestyle: (image: ImageData) => void;
-  onDeleteResult: (image: ImageData) => void;
-  onDeleteVideo: (video: VideoData) => void;
+  productHistory: ProductData[];
+  lifestyleHistory: StoredImageData[];
+  resultHistory: StoredImageData[];
+  videoHistory: StoredVideoData[];
+  onSelectProduct: (product: ProductData) => void;
+  onSelectLifestyle: (image: StoredImageData) => void;
+  onSelectResult: (image: StoredImageData) => void;
+  onSelectVideo: (video: StoredVideoData) => void;
+  onProductUpload: (image: UploadableImageData) => void;
+  onLifestyleUpload: (image: UploadableImageData) => void;
+  onDeleteProduct: (product: ProductData) => void;
+  onDeleteLifestyle: (image: StoredImageData) => void;
+  onDeleteResult: (image: StoredImageData) => void;
+  onDeleteVideo: (video: StoredVideoData) => void;
 }
 
 const TABS: { id: Tab; label: string; icon: React.FC<React.SVGProps<SVGSVGElement>> }[] = [
@@ -52,34 +52,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const imageHistories = {
-    products: productHistory,
-    lifestyles: lifestyleHistory,
-    results: resultHistory,
-  };
-
-  const imageSelectors = {
-    products: onSelectProduct,
-    lifestyles: onSelectLifestyle,
-    results: onSelectResult,
-  };
-  
-  const imageDeleteHandlers = {
-    products: onDeleteProduct,
-    lifestyles: onDeleteLifestyle,
-    results: onDeleteResult,
-  };
-
-  const currentHistory = activeTab === 'videos' ? videoHistory : imageHistories[activeTab];
-
   const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
   
-  const handleDownloadImage = (image: ImageData) => {
+  const handleDownloadImage = (image: StoredImageData) => {
     if (!image) return;
     const link = document.createElement('a');
-    link.href = `data:${image.mimeType};base64,${image.base64}`;
+    link.href = image.url;
     link.download = `product-scene-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
@@ -108,6 +88,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
       e.target.value = '';
     }
   };
+  
+  const renderContent = () => {
+      switch (activeTab) {
+        case 'products':
+          return productHistory.map((product) => (
+              <ImageThumbnail
+                key={product.id}
+                image={product.primaryImage}
+                onClick={() => onSelectProduct(product)}
+                onDelete={() => onDeleteProduct(product)}
+                angleCount={product.angleImages.length}
+              />
+          ));
+        case 'lifestyles':
+            return lifestyleHistory.map((image) => (
+                <ImageThumbnail key={image.id} image={image} onClick={() => onSelectLifestyle(image)} onDelete={() => onDeleteLifestyle(image)} />
+            ));
+        case 'results':
+            return resultHistory.map((image) => (
+                <ImageThumbnail
+                    key={image.id}
+                    image={image}
+                    onClick={() => onSelectResult(image)}
+                    onDelete={() => onDeleteResult(image)}
+                    onDownload={() => handleDownloadImage(image)}
+                    showDownload={true}
+                />
+            ));
+        case 'videos':
+            return videoHistory.map((video) => (
+                <VideoThumbnail key={video.id} video={video} onClick={() => onSelectVideo(video)} onDelete={() => onDeleteVideo(video)} />
+            ));
+        default:
+            return null;
+      }
+  }
+  
+  const currentHistory = {
+      products: productHistory,
+      lifestyles: lifestyleHistory,
+      results: resultHistory,
+      videos: videoHistory,
+  }[activeTab];
 
   return (
     <aside className="w-80 bg-gray-900/60 border-r border-gray-700/50 flex flex-col">
@@ -135,31 +158,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className="aspect-square bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-700 flex flex-col items-center justify-center text-gray-500 hover:border-indigo-600 hover:text-indigo-500 transition-colors duration-200"
             >
               <PlusIcon className="h-8 w-8 mb-1" />
-              <span className="text-sm font-semibold">Add Image</span>
+              <span className="text-sm font-semibold">{activeTab === 'products' ? 'Add Product' : 'Add Image'}</span>
             </button>
           )}
           
-          {(activeTab === 'products' || activeTab === 'lifestyles' || activeTab === 'results') &&
-            imageHistories[activeTab].map((image) => (
-              <ImageThumbnail
-                key={image.base64}
-                image={image}
-                onClick={() => imageSelectors[activeTab](image)}
-                onDelete={() => imageDeleteHandlers[activeTab](image)}
-                onDownload={() => handleDownloadImage(image)}
-                showDownload={activeTab === 'results'}
-              />
-          ))}
+          {renderContent()}
 
-          {activeTab === 'videos' &&
-            videoHistory.map((video) => (
-              <VideoThumbnail
-                key={video.id}
-                video={video}
-                onClick={() => onSelectVideo(video)}
-                onDelete={() => onDeleteVideo(video)}
-              />
-          ))}
         </div>
         {currentHistory.length === 0 && (activeTab === 'results' || activeTab === 'videos') && (
           <div className="flex items-center justify-center h-full text-center text-gray-600">

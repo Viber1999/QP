@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import type { ImageData } from '../types';
+import type { UploadableImageData, StoredImageData } from '../types';
 import { UploadIcon, CloseIcon } from './IconComponents';
 
 interface ImageUploaderProps {
-  onImageUpload: (imageData: ImageData) => void;
+  onImageUpload: (imageData: UploadableImageData) => void;
   title: string;
-  currentImage: ImageData | null;
+  currentImage: StoredImageData | null;
   onRemove?: () => void;
 }
 
@@ -16,7 +16,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageUpload, tit
 
   useEffect(() => {
     if (currentImage) {
-      setPreviewUrl(`data:${currentImage.mimeType};base64,${currentImage.base64}`);
+      setPreviewUrl(currentImage.url);
     } else {
       setPreviewUrl(null);
     }

@@ -1,9 +1,9 @@
 import React from 'react';
-import type { VideoData } from '../types';
+import type { StoredVideoData } from '../types';
 import { CloseIcon } from './IconComponents';
 
 interface VideoThumbnailProps {
-  video: VideoData;
+  video: StoredVideoData;
   onClick: () => void;
   onDelete: () => void;
 }

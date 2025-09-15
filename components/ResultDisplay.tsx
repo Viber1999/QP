@@ -1,20 +1,22 @@
 import React from 'react';
-import type { ImageData } from '../types';
+import type { StoredImageData } from '../types';
 import { Spinner } from './Spinner';
 import { DownloadIcon, ImageIcon } from './IconComponents';
 
 interface ResultDisplayProps {
-  image: ImageData | null;
+  image: StoredImageData | null;
   isLoading: boolean;
+  loadingText?: string | null;
   onPreview?: () => void;
 }
 
-export const ResultDisplay: React.FC<ResultDisplayProps> = ({ image, isLoading, onPreview }) => {
+export const ResultDisplay: React.FC<ResultDisplayProps> = ({ image, isLoading, loadingText, onPreview }) => {
   const handleDownload = () => {
     if (!image) return;
     const link = document.createElement('a');
-    link.href = `data:${image.mimeType};base64,${image.base64}`;
+    link.href = image.url;
     link.download = `product-scene-${Date.now()}.png`;
+    link.target = '_blank'; // Good practice for cross-origin downloads
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -28,12 +30,12 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({ image, isLoading, 
       {isLoading && (
         <div className="flex flex-col items-center">
           <Spinner />
-          <p className="text-gray-400 mt-4">Creating your final scene...</p>
+          <p className="text-gray-400 mt-4">{loadingText || 'Creating your final scene...'}</p>
         </div>
       )}
       {!isLoading && image && (
         <>
-            <img src={`data:${image.mimeType};base64,${image.base64}`} alt="Generated Scene" className="max-w-full max-h-full object-contain rounded-lg" />
+            <img src={image.url} alt="Generated Scene" className="max-w-full max-h-full object-contain rounded-lg" />
             <button
               onClick={(e) => {
                 e.stopPropagation();

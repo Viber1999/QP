@@ -1,9 +1,9 @@
 import React from 'react';
-import type { VideoData } from '../types';
+import type { StoredVideoData } from '../types';
 import { CloseIcon, DownloadIcon } from './IconComponents';
 
 interface VideoPreviewModalProps {
-  video: VideoData | null;
+  video: StoredVideoData | null;
   onClose: () => void;
 }
 
